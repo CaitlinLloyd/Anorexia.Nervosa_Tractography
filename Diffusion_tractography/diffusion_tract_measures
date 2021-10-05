@@ -1,0 +1,44 @@
+#!/bin/bash
+
+sub=$1
+inDir=$2
+ses=$3
+streamline=$4
+sift=$5
+threads=$6
+direction=$7
+topupFlag=$8
+upsampleFlag=$9
+voxelSize=${10}
+codedir=${11}
+
+
+source ${codedir}/make_diff_names ${sub} ${inDir} ${ses} ${streamline} ${sift} ${threads} ${direction} ${topupFlag} ${upsampleFlag} ${voxelSize}
+
+
+cd ${tractDir}
+
+tcksample ${sifttrack}.tck ${dtifitFA}.mif ${sampleFA} -stat_tck mean -force -nthreads ${threads}
+tcksample ${sifttrack}.tck ${dtifitMD}.mif ${sampleMD} -stat_tck mean -force -nthreads ${threads}
+tcksample ${sifttrack}.tck ${dtifitAD}.mif ${sampleAD} -stat_tck mean -force -nthreads ${threads}
+tcksample ${sifttrack}.tck ${dtifitRD}.mif ${sampleRD} -stat_tck mean -force -nthreads ${threads}
+
+# first aparc+aseg
+tck2connectome -force -zero_diagonal -nthreads ${threads} ${sifttrack}.tck ${nodes_aparcaseg}.mif ${aparcasegCount} 
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_length ${sifttrack}.tck ${nodes_aparcaseg}.mif ${aparcasegLength} 
+
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_file ${sampleFA} ${sifttrack}.tck ${nodes_aparcaseg}.mif ${aparcasegFA} 
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_file ${sampleMD} ${sifttrack}.tck ${nodes_aparcaseg}.mif ${aparcasegMD} 
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_file ${sampleAD} ${sifttrack}.tck ${nodes_aparcaseg}.mif ${aparcasegAD} 
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_file ${sampleRD} ${sifttrack}.tck ${nodes_aparcaseg}.mif ${aparcasegRD}  
+
+
+# then aparc.a2009s+aseg
+tck2connectome -force -zero_diagonal -nthreads ${threads} ${sifttrack}.tck ${nodes_aparca2009s}.mif ${aparca2009sCount} 
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_length ${sifttrack}.tck ${nodes_aparca2009s}.mif ${aparca2009sLength} 
+
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_file ${sampleFA} ${sifttrack}.tck ${nodes_aparca2009s}.mif ${aparca2009sFA} 
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_file ${sampleMD} ${sifttrack}.tck ${nodes_aparca2009s}.mif ${aparca2009sMD} 
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_file ${sampleAD} ${sifttrack}.tck ${nodes_aparca2009s}.mif ${aparca2009sAD} 
+tck2connectome -force -zero_diagonal -nthreads ${threads} -stat_edge mean -scale_file ${sampleRD} ${sifttrack}.tck ${nodes_aparca2009s}.mif ${aparca2009sRD}   
+

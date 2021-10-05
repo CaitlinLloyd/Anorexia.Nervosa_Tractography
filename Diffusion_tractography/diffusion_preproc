@@ -1,0 +1,103 @@
+#!/bin/bash
+
+# perform diffusion preprocessing for 
+
+
+sub=$1
+inDir=$2
+ses=$3
+streamline=$4
+sift=$5
+threads=$6
+direction=$7
+topupFlag=$8
+upsampleFlag=$9
+voxelSize=${10}
+codedir=${11}
+
+
+
+source ${codedir}/make_diff_names ${sub} ${inDir} ${ses} ${streamline} ${sift} ${threads} ${direction} ${topupFlag} ${upsampleFlag} ${voxelSize}
+
+cd ${preprocDir}
+
+#################
+
+mrconvert ${dwi}.nii.gz -force ${dwi}.mif -fslgrad ${dwi}.bvec ${dwi}.bval -datatype float32 -stride 0,0,0,1 -nthreads ${threads}
+
+dwidenoise ${dwi}.mif -force ${dwi_denoise}.mif -nthreads ${threads}
+
+mrdegibbs ${dwi_denoise}.mif -force ${dwi_degibbs}.mif -nthreads ${threads}
+
+echo "done degibbs"
+
+## if top up
+
+
+if [ ${topupFlag} = yes ] && [ -e "${fow}.nii.gz" ]; then
+	echo "Combining topups..."
+	mrconvert ${fow}.nii.gz ${fow}.mif -force
+	mrconvert ${rev}.nii.gz ${rev}.mif -force
+	mrcat ${fow}.mif ${rev}.mif ${b0_pair}.mif -force
+
+	###
+	dwifslpreproc ${dwi_degibbs}.mif ${dwi_preproc}.mif -rpe_pair -se_epi ${b0_pair}.mif -pe_dir ${direction} -nthreads ${threads} -force -eddy_options " --niter=8 --fwhm=10,8,4,2,0,0,0,0 --repol --data_is_shelled --slm=linear"
+else
+	echo "No TOPUP --- DISTORTION CORRECTION NOT PERFORMED"
+	dwifslpreproc ${dwi_degibbs}.mif ${dwi_preproc}.mif -rpe_none -pe_dir ${direction} -nthreads ${threads} -force -nocleanup -eddyqc_all ${preprocDir}/eddyqc -eddy_options " --niter=8 --fwhm=10,8,4,2,0,0,0,0 --repol --data_is_shelled --slm=linear"
+
+fi
+
+
+dwiextract ${dwi_preproc}.mif - -bzero -nthreads ${threads} | mrmath - mean -force ${meanb0_noBC}.mif -axis 3 -quiet -nthreads ${threads}
+
+# mask extraction in fsl, to be used to get a better bias correction. 
+mrconvert ${meanb0_noBC}.mif ${meanb0_noBC}.nii.gz -force -quiet -nthreads ${threads}
+bet2 ${meanb0_noBC} ${meanb0_noBC_bet2} -m -f 0.1 -v
+
+
+dwibiascorrect ants ${dwi_preproc}.mif ${dwi_preproc_BC}.mif -mask ${meanb0_noBC_bet2}_mask.nii.gz -force -ants.b [100,3] -ants.c [1000,0.0] -ants.s 4
+
+echo "done dwibiascorr"
+## add a check if dwibiascorrect fails, then call a script to fix it or just fix it here? should call a script: 
+if [ ! -e ${dwi_preproc_BC}.mif ]; then 
+	cd dwibiascorrect-tmp-*
+	mrtransform mask.nii -template in.mif mask_fixed.nii
+	mrconvert mask_fixed.nii mask_fixed.mif
+
+	N4BiasFieldCorrection -d 3 -i mean_bzero.nii -w mask_fixed.nii -o [corrected.nii,init_bias.nii] -s 4 -b [100,3] -c [1000,0.0]
+	#mrcalc mean_bzero.mif mask_fixed.mif -mult - | mrmath - sum - -axis 0 | mrmath - sum - -axis 1 | mrmath - sum - -axis 2 | mrdump -
+	#mrcalc corrected.nii mask_fixed.mif -mult - | mrmath - sum - -axis 0 | mrmath - sum - -axis 1 | mrmath - sum - -axis 2 | mrdump - 
+	#mrcalc init_bias.nii 1.16176598305 -mult bias.mif
+	#mrcalc in.mif bias.mif -div result.mif
+
+	meanout=$(mrcalc mean_bzero.mif mask_fixed.mif -mult - | mrmath - sum - -axis 0 | mrmath - sum - -axis 1 | mrmath - sum - -axis 2 | mrdump -)
+	corrout=$(mrcalc corrected.nii mask_fixed.mif -mult - | mrmath - sum - -axis 0 | mrmath - sum - -axis 1 | mrmath - sum - -axis 2 | mrdump -)
+	
+	meanusable=$(sed -E 's/([+-]?[0-9.]+)[eE]\+?(-?)([0-9]+)/(\1*10^\2\3)/g' <<<"$meanout")
+	corrusable=$(sed -E 's/([+-]?[0-9.]+)[eE]\+?(-?)([0-9]+)/(\1*10^\2\3)/g' <<<"$corrout")
+
+	divFactor=$(echo "scale=11 ; $corrusable / $meanusable" | bc)
+	#mrcalc init_bias.nii 1.16176598305 -mult bias.mif
+	mrcalc init_bias.nii ${divFactor} -mult bias.mif
+	mrcalc in.mif bias.mif -div result.mif
+
+	
+	mrconvert result.mif ${dwi_preproc_BC}.mif
+	cd ${preprocDir}
+fi
+
+echo "have the preproc"
+dwiextract ${dwi_preproc_BC}.mif - -bzero -quiet -nthreads ${threads} | mrmath - mean -force ${meanb0}.mif -axis 3 -quiet -nthreads ${threads}
+
+# final mask extraction in fsl, now with bias correction. 
+mrconvert ${meanb0}.mif ${meanb0}.nii.gz -force -quiet -nthreads ${threads}
+bet2 ${meanb0} ${meanb0_bet2} -m -f 0.2 -v
+
+echo  "now upsample"
+if [ ${upsampleFlag} = yes ]; then
+	${codedir}/diffusion_upsample ${sub} ${inDir} ${ses} ${streamline} ${sift} ${threads} ${pedir} ${topupFlag} ${upsampleFlag} ${voxel} ${codedir}
+else
+	mrconvert ${dwi_preproc_BC}.mif ${dwi_preproc_BC}.nii.gz -force -nthreads ${threads}
+fi
+

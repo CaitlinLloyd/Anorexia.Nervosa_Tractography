@@ -1,0 +1,31 @@
+#!/bin/bash
+
+sub=$1
+inDir=$2
+ses=$3
+streamline=$4
+sift=$5
+threads=$6
+direction=$7
+topupFlag=$8
+upsampleFlag=$9
+voxelSize=${10}
+codedir=${11}
+
+
+source ${codedir}/make_diff_names ${sub} ${inDir} ${ses} ${streamline} ${sift} ${threads} ${direction} ${topupFlag} ${upsampleFlag} ${voxelSize}
+
+cd ${FODdir}
+
+if [ ${upsampleFlag} = yes ]; then
+	tempDiff=${dwi_preproc_BC_up}
+	tempMask=${meanb0_bet2_mask_up}
+else
+	tempDiff=${dwi_preproc_BC}
+	tempMask=${meanb0_bet2_mask}
+fi
+
+
+dwi2response dhollander ${tempDiff}.mif ${wmresponse} ${gmresponse} ${csfresponse} -voxels ${voxel_resp} -force -nthreads ${threads}
+dwi2fod msmt_csd ${tempDiff}.mif ${wmresponse} ${WMFOD}.mif ${csfresponse} ${csfODF}.mif -mask ${tempMask}.nii.gz -force -nthreads ${threads}
+mtnormalise ${WMFOD}.mif ${WMFOD_norm}.mif ${csfODF}.mif ${csfODF_norm}.mif -mask ${tempMask}.nii.gz -force -nthreads ${threads}
