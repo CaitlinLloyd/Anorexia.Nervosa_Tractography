@@ -1,0 +1,76 @@
+#!/bin/bash
+
+
+sub=$1
+inDir=$2
+ses=$3
+streamline=$4
+sift=$5
+threads=$6
+direction=$7
+topupFlag=$8
+upsampleFlag=$9
+voxelSize=${10}
+codedir=${11}
+
+
+source ${codedir}/make_diff_names ${sub} ${inDir} ${ses} ${streamline} ${sift} ${threads} ${direction} ${topupFlag} ${upsampleFlag} ${voxelSize}
+
+cd ${regDir}
+
+# convert the FS outputs to usable format
+mrconvert ${fs_T1}.mgz ${fs_T1}.nii.gz -stride -1,2,3 -force
+mrconvert ${aparcaseg}.mgz ${aparcaseg}.nii.gz -stride -1,2,3 -force
+mrconvert ${aparca2009s}.mgz ${aparca2009s}.nii.gz -stride -1,2,3 -force
+
+
+# flirt the anatomical to the diffusion space via the meanb0_bet_up, output hires2dwi and hires2dwi.mat
+
+flirt  -in ${fs_T1} -ref ${meanb0_bet2} -out ${hires2dwi} -omat ${hires2dwi}.mat -dof 6
+
+ANTS 3 -m PR[${meanb0_bet2}.nii.gz,${hires2dwi}.nii.gz,1,2] -i 50x20x10 -o ${HR2dwi2meanb0}.nii.gz -t SyN[0.3] -r Gauss[3,0]
+WarpImageMultiTransform 3 ${hires2dwi}.nii.gz ${HR2dwi2meanb0_warp}.nii.gz -R ${meanb0_bet2}.nii.gz ${HR2dwi2meanb0_synWarp}.nii.gz ${HR2dwi2meanb0_synAffine}.txt
+
+
+## 5TTP
+# need to make it and also split it I guess? yes
+5ttgen freesurfer ${aparcaseg}.nii.gz ${base5tt}.nii.gz -nocrop -sgm_amyg_hipp -force -nthreads ${threads}
+
+flirt -in ${base5tt} -ref ${meanb0_bet2} -out ${base5tt2dwi} -applyxfm -init ${hires2dwi}.mat -interp nearestneighbour
+fslsplit ${base5tt2dwi} ${base5tt2dwi}_ -t
+
+
+
+for i in $(seq 0 4); do
+	WarpImageMultiTransform 3 ${base5tt2dwi}_000${i}.nii.gz ${base5tt2dwi_warp}_${i}.nii.gz --use-NN -R ${meanb0_bet2}.nii.gz ${HR2dwi2meanb0_synWarp}.nii.gz ${HR2dwi2meanb0_synAffine}.txt
+done
+
+fslmerge -t ${fiveTTP2dwi_warp} $(ls | grep '5TTP' | grep 'warp')
+
+
+# APARC ASEG, both now
+flirt -in ${aparcaseg} -ref ${meanb0_bet2} -out ${aparcaseg2dwi} -applyxfm -init ${hires2dwi}.mat -interp nearestneighbour
+WarpImageMultiTransform 3 ${aparcaseg2dwi}.nii.gz ${aparcaseg2dwi_warp}.nii.gz --use-NN -R ${meanb0_bet2}.nii.gz ${HR2dwi2meanb0_synWarp}.nii.gz ${HR2dwi2meanb0_synAffine}.txt
+
+flirt -in ${aparca2009s} -ref ${meanb0_bet2} -out ${aparca2009s2dwi} -applyxfm -init ${hires2dwi}.mat -interp nearestneighbour
+WarpImageMultiTransform 3 ${aparca2009s2dwi}.nii.gz ${aparca2009s2dwi_warp}.nii.gz --use-NN -R ${meanb0_bet2}.nii.gz ${HR2dwi2meanb0_synWarp}.nii.gz ${HR2dwi2meanb0_synAffine}.txt
+
+
+if [ ${upsampleFlag} = yes ]; then
+	mrgrid ${aparcaseg2dwi_warp}.nii.gz regrid -voxel ${voxelSize} ${aparcaseg2dwi_warp_up}.nii.gz -force -nthreads ${threads} -interp nearest -datatype uint32
+	mrgrid ${aparca2009s2dwi_warp}.nii.gz regrid -voxel ${voxelSize} ${aparca2009s2dwi_warp_up}.nii.gz -force -nthreads ${threads} -interp nearest -datatype uint32
+	mrgrid ${fiveTTP2dwi_warp}.nii.gz regrid -voxel ${voxelSize} ${fiveTTP2dwi_warp_up}.nii.gz -force -nthreads ${threads} -interp nearest
+
+	tempAparc=${aparcaseg2dwi_warp_up}
+	tempA2009s=${aparca2009s2dwi_warp_up}
+else
+	tempAparc=${aparcaseg2dwi_warp}
+	tempA2009s=${aparca2009s2dwi_warp}
+fi
+
+
+## make the nodes
+labelconvert ${tempAparc}.nii.gz ${FREESURFER_HOME}/FreeSurferColorLUT.txt ${mrtrix_path}/fs_default.txt ${nodes_aparcaseg}.mif -force
+labelconvert ${tempA2009s}.nii.gz ${FREESURFER_HOME}/FreeSurferColorLUT.txt ${mrtrix_path}/fs_a2009s.txt ${nodes_aparca2009s}.mif -force
+ 
+

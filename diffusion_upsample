@@ -1,0 +1,25 @@
+#!/bin/bash
+
+sub=$1
+inDir=$2
+ses=$3
+streamline=$4
+sift=$5
+threads=$6
+direction=$7
+topupFlag=$8
+upsampleFlag=$9
+voxelSize=${10}
+codedir=${11}
+
+
+source ${codedir}/make_diff_names ${sub} ${inDir} ${ses} ${streamline} ${sift} ${threads} ${direction} ${topupFlag} ${upsampleFlag} ${voxelSize}
+
+echo "UPSAMPLING TO ISOTROPIC VOXEL SIZE ${voxelSize} mm..."
+mrgrid ${meanb0_bet2}.nii.gz regrid -voxel ${voxelSize} ${meanb0_bet2_up}.nii.gz -force -interp sinc -nthreads ${threads} -quiet
+mrgrid ${meanb0_bet2_mask}.nii.gz regrid -voxel ${voxelSize} ${meanb0_bet2_mask_up}.nii.gz -force -interp nearest -nthreads ${threads} -quiet
+mrgrid ${dwi_preproc_BC}.mif regrid -voxel ${voxelSize} ${dwi_preproc_BC_up}.mif -force -interp sinc -nthreads ${threads} -quiet
+mrgrid ${meanb0}.mif regrid -voxel ${voxelSize} ${meanb0_up}.mif -force -interp sinc -nthreads ${threads} -quiet
+
+mrconvert ${dwi_preproc_BC_up}.mif ${dwi_preproc_BC_up}.nii.gz -force
+mrconvert ${meanb0_up}.mif ${meanb0_up}.nii.gz -force
